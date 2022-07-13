@@ -1,0 +1,5 @@
+#!/bin/bash
+
+flake8 main.py
+mypy --ignore-missing-imports main.py
+
