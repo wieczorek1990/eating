@@ -26,7 +26,6 @@ def fetch(filename: str, cast: typing.Callable = int) -> list[tuple]:
     return ids
 
 
-
 def insert(ids: list[tuple], column_names: list[str]) -> None:
     columns = ', '.join(column_names)
     sql = f'''

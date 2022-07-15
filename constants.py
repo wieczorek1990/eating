@@ -1,3 +1,2 @@
 DELIMITER = ';'
 QUOTECHAR = '"'
-
