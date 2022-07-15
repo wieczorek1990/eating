@@ -1,5 +1,5 @@
 #!/bin/bash
 
-flake8 main.py
+black --skip-string-normalization -l 80 .
 mypy --ignore-missing-imports *.py
 
