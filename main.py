@@ -1,41 +1,29 @@
 #!/usr/bin/env python
 
-import contextlib
 import csv
 import getpass
 import sys
-import typing
 
-import psycopg2
 from psycopg2 import extras
 
-
-class DSN:
-    def __init__(self) -> None:
-        self.password: typing.Optional[str] = None
-
-    def set_password(self, password: str) -> None:
-        self.password = password
-
-    def get(self) -> str:
-        if self.password is None:
-            password_string = ''
-        else:
-            password_string = ':{self.password}'
-        return f'postgresql://postgres{password_string}@localhost:5433/eating'
-
-
-dsn = DSN()
+import common
+import constants
+import psy
 
 
 def fetch(filename: str) -> list[list[str]]:
     records = []
     with open(filename) as csv_file:
-        reader = csv.reader(csv_file, delimiter=';', quotechar='"')
-        next(reader)  # headers
+        reader = csv.reader(
+            csv_file,
+            delimiter=constants.DELIMITER,
+            quotechar=constants.QUOTECHAR,
+        )
+        next(reader)  # skip headers
         for row in reader:
-            if len(row) != 0:
-                records.append(row)
+            if len(row) == 0:
+                continue
+            records.append(row)
     return records
 
 
@@ -49,45 +37,34 @@ def transform(records: list[list[str]]) -> list[tuple[str, str]]:
     return list(records_set)
 
 
-@contextlib.contextmanager
-def query() -> typing.Generator:
-    dsn_string = dsn.get()
-    connection = psycopg2.connect(dsn_string)
-    cursor = connection.cursor()
-    yield cursor
-    connection.commit()
-    cursor.close()
-    connection.close()
-
-
 def insert(records: list[tuple[str, str]]) -> None:
-    with query() as cursor:
-        sql = '''
-            INSERT INTO products(name, polish_name) VALUES %s;
-        '''
+    sql = '''
+        INSERT INTO products(name, polish_name) VALUES %s;
+    '''
+    with psy.query() as cursor:
         extras.execute_values(cursor, sql, records)
 
 
 def deduplicate() -> None:
-    with query() as cursor:
-        sql = '''
-            DELETE FROM products WHERE id IN (
-                SELECT a.id
-                FROM products a JOIN products b
-                ON a.name = b.name AND
-                   a.polish_name = b.polish_name AND
-                   a.id != b.id
-                WHERE a.id > b.id
-            );
-        '''
+    sql = '''
+        DELETE FROM products WHERE id IN (
+            SELECT a.id
+            FROM products a JOIN products b
+            ON a.name = b.name AND
+               a.polish_name = b.polish_name AND
+               a.id != b.id
+            WHERE a.id > b.id
+        );
+    '''
+    with psy.query() as cursor:
         cursor.execute(sql)
 
 
 def select(name: str, polish_name: str) -> int:
-    with query() as cursor:
-        sql = '''
-            SELECT id FROM products WHERE name = %s AND polish_name = %s;
-        '''
+    sql = '''
+        SELECT id FROM products WHERE name = %s AND polish_name = %s;
+    '''
+    with psy.query() as cursor:
         cursor.execute(sql, (name, polish_name))
         result = cursor.fetchone()
         if result is not None:
@@ -101,26 +78,12 @@ def insert_forbidden(records: list[list[str]]) -> None:
         a_id = select(a_name, a_polish_name)
         b_id = select(b_name, b_polish_name)
         ids.append((a_id, b_id))
-    with query() as cursor:
-        sql = '''
-            INSERT INTO forbidden_eating(a_id, b_id) VALUES %s;
-        '''
+
+    sql = '''
+        INSERT INTO forbidden_eating(a_id, b_id) VALUES %s;
+    '''
+    with psy.query() as cursor:
         extras.execute_values(cursor, sql, ids)
-
-
-def deduplicate_forbidden():
-    with query() as cursor:
-        sql = '''
-            DELETE FROM forbidden_eating WHERE id IN (
-                SELECT DISTINCT(a.id)
-                    FROM forbidden_eating a JOIN forbidden_eating b
-                    ON a.a_id = b.a_id AND
-                       a.b_id = b.b_id AND
-                       a.id != b.id
-                    WHERE a.id > b.id
-            );
-        '''
-        cursor.execute(sql)
 
 
 def main(argv: list[str]) -> None:
@@ -130,14 +93,14 @@ def main(argv: list[str]) -> None:
     filename = argv[1]
 
     password = getpass.getpass(prompt='Please enter your password: ')
-    dsn.set_password(password)
+    psy.dsn.set_password(password)
 
     records = fetch(filename)
     products_records = transform(records)
     insert(products_records)
     deduplicate()
     insert_forbidden(records)
-    deduplicate_forbidden()
+    common.deduplicate_forbidden()
 
 
 if __name__ == '__main__':
